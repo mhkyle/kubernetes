@@ -191,9 +191,9 @@ var (
 	// This is the same metric that also gets recorded in the kube-controller-manager.
 	ResourceClaimCreatesTotal = resourceclaimmetrics.ResourceClaimCreate
 
-	podGroupScheduleAttempts           *metrics.CounterVec
-	podGroupSchedulingLatency          *metrics.HistogramVec
-	PodGroupSchedulingAlgorithmLatency *metrics.Histogram
+	PodGroupScheduleAttempts           *metrics.CounterVec
+	PodGroupSchedulingLatency          *metrics.HistogramVec
+	PodGroupSchedulingAlgorithmLatency *metrics.HistogramVec
 
 	// The below are only available when the TopologyAwareWorkloadScheduling feature gate is enabled.
 	GeneratedPlacementsTotal    *metrics.CounterVec
@@ -240,8 +240,8 @@ func Register() {
 		}
 		if utilfeature.DefaultFeatureGate.Enabled(features.GenericWorkload) {
 			RegisterMetrics(
-				podGroupScheduleAttempts,
-				podGroupSchedulingLatency,
+				PodGroupScheduleAttempts,
+				PodGroupSchedulingLatency,
 				PodGroupSchedulingAlgorithmLatency,
 				WorkloadPreemptionAttempts,
 				WorkloadPreemptionVictims,
@@ -594,30 +594,30 @@ func InitMetrics() {
 		},
 		[]string{"profile"})
 
-	// The below (podGroupScheduleAttempts, podGroupSchedulingLatency and PodGroupSchedulingAlgorithmLatency) are only available when the GenericWorkload feature gate is enabled.
-	podGroupScheduleAttempts = metrics.NewCounterVec(
+	// The below (PodGroupScheduleAttempts, PodGroupSchedulingLatency and PodGroupSchedulingAlgorithmLatency) are only available when the GenericWorkload feature gate is enabled.
+	PodGroupScheduleAttempts = metrics.NewCounterVec(
 		&metrics.CounterOpts{
 			Subsystem:      SchedulerSubsystem,
 			Name:           "podgroup_schedule_attempts_total",
-			Help:           "Number of attempts to schedule pod group, by the result and scheduler profile. 'unschedulable' means a pod group could not be scheduled, while 'error' means an internal scheduler problem.",
+			Help:           "Number of attempts to schedule pod group, by the result, scheduler profile and entity type ('podgroup' or 'compositepodgroup'). 'unschedulable' means a pod group could not be scheduled, while 'error' means an internal scheduler problem.",
 			StabilityLevel: metrics.ALPHA,
-		}, []string{"result", "profile"})
-	podGroupSchedulingLatency = metrics.NewHistogramVec(
+		}, []string{"result", "profile", "entity"})
+	PodGroupSchedulingLatency = metrics.NewHistogramVec(
 		&metrics.HistogramOpts{
 			Subsystem:      SchedulerSubsystem,
 			Name:           "podgroup_scheduling_attempt_duration_seconds",
-			Help:           "Pod group scheduling attempt latency in seconds, by scheduler profile.",
+			Help:           "Pod group scheduling attempt latency in seconds, by result, scheduler profile and entity type ('podgroup' or 'compositepodgroup').",
 			Buckets:        metrics.ExponentialBuckets(0.001, 2, 15),
 			StabilityLevel: metrics.ALPHA,
-		}, []string{"result", "profile"})
-	PodGroupSchedulingAlgorithmLatency = metrics.NewHistogram(
+		}, []string{"result", "profile", "entity"})
+	PodGroupSchedulingAlgorithmLatency = metrics.NewHistogramVec(
 		&metrics.HistogramOpts{
 			Subsystem:      SchedulerSubsystem,
 			Name:           "podgroup_scheduling_algorithm_duration_seconds",
-			Help:           "Pod group scheduling algorithm latency in seconds",
+			Help:           "Pod group scheduling algorithm latency in seconds, by scheduler profile and entity type ('podgroup' or 'compositepodgroup').",
 			Buckets:        metrics.ExponentialBuckets(0.001, 2, 15),
 			StabilityLevel: metrics.ALPHA,
-		})
+		}, []string{"profile", "entity"})
 
 	// Workload preemption
 	WorkloadPreemptionAttempts = metrics.NewCounterVec(
@@ -640,11 +640,11 @@ func InitMetrics() {
 		&metrics.HistogramOpts{
 			Subsystem: SchedulerSubsystem,
 			Name:      "preemption_workload_disruptions",
-			Help:      "Number of workload preemption units being preempted. A single preemption unit can be all pods in a pod group or composite pod group hierarchy (in case of DisruptionMode=all), or a single pod (in case of DisruptionMode=single).",
+			Help:      "Number of preemption units evicted by a single workload preemption (either pod groups or composite pod groups), by victim type. A unit is either all pods of a pod group or composite pod group hierarchy with DisruptionMode=all (victim is the type of its topmost group with DisruptionMode=all), or a single pod evicted on its own (victim=pod), which covers pods outside of any group and pods of groups with DisruptionMode=single.",
 			// Start with 1 with the last bucket being [1024, Inf)
 			Buckets:        metrics.ExponentialBuckets(1, 2, 11),
 			StabilityLevel: metrics.ALPHA,
-		}, []string{"preemptor"})
+		}, []string{"preemptor", "victim"})
 	PreemptionEvaluationDuration = metrics.NewHistogramVec(
 		&metrics.HistogramOpts{
 			Subsystem: SchedulerSubsystem,

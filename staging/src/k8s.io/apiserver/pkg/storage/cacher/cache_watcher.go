@@ -19,11 +19,14 @@ package cacher
 import (
 	"context"
 	"fmt"
+	"maps"
+	"reflect"
 	"sync"
 	"time"
 
 	"k8s.io/utils/clock"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -354,6 +357,22 @@ func (c *cacheWatcher) isDoneChannelClosedLocked() bool {
 	return false
 }
 
+func getShallowCopyObject(object runtime.Object) runtime.Object {
+	if _, ok := object.(*cachingObject); ok {
+		return object
+	}
+	if u, ok := object.(*unstructured.Unstructured); ok {
+		return &unstructured.Unstructured{Object: maps.Clone(u.Object)}
+	}
+	v := reflect.ValueOf(object)
+	if v.Kind() == reflect.Pointer && v.Elem().Kind() == reflect.Struct {
+		cp := reflect.New(v.Type().Elem())
+		cp.Elem().Set(v.Elem())
+		return cp.Interface().(runtime.Object)
+	}
+	return object.DeepCopyObject()
+}
+
 func getMutableObject(object runtime.Object) runtime.Object {
 	if _, ok := object.(*cachingObject); ok {
 		// It is safe to return without deep-copy, because the underlying
@@ -394,9 +413,9 @@ func (c *cacheWatcher) convertToWatchEvent(event *watchCacheEvent) *watch.Event 
 
 	switch {
 	case curObjPasses && !oldObjPasses:
-		return &watch.Event{Type: watch.Added, Object: getMutableObject(event.Object)}
+		return &watch.Event{Type: watch.Added, Object: getShallowCopyObject(event.Object)}
 	case curObjPasses && oldObjPasses:
-		return &watch.Event{Type: watch.Modified, Object: getMutableObject(event.Object)}
+		return &watch.Event{Type: watch.Modified, Object: getShallowCopyObject(event.Object)}
 	case !curObjPasses && oldObjPasses:
 		// return a delete event with the previous object content, but with the event's resource version
 		oldObj := getMutableObject(event.PrevObject)
@@ -447,13 +466,12 @@ func (c *cacheWatcher) sendWatchCacheEvent(event *watchCacheEvent) (builtAt, sen
 	return builtAt, sentAt
 }
 
-func (c *cacheWatcher) process(ctx context.Context, cacheInterval *watchCacheInterval, resourceVersion uint64) {
+func (c *cacheWatcher) process(ctx context.Context, cacheInterval *watchCacheInterval) {
 	defer utilruntime.HandleCrashWithContext(ctx)
 	defer close(c.result)
 	defer c.Stop()
 
-	resourceVersion, err := c.processInitialEvents(cacheInterval, resourceVersion)
-	if err != nil {
+	if err := c.processInitialEvents(cacheInterval); err != nil {
 		return
 	}
 	// At this point we already start processing incoming watch events.
@@ -463,13 +481,10 @@ func (c *cacheWatcher) process(ctx context.Context, cacheInterval *watchCacheInt
 	//   the initialization signal proportionally to the number of events to
 	//   process, but we're leaving this to the tuning phase.
 	utilflowcontrol.WatchInitialized(ctx)
-	c.processIncomingEvents(ctx, resourceVersion)
+	c.processIncomingEvents(ctx, cacheInterval.resourceVersion)
 }
 
-func (c *cacheWatcher) processInitialEvents(cacheInterval *watchCacheInterval, resourceVersion uint64) (uint64, error) {
-	if cacheInterval == nil {
-		return resourceVersion, nil
-	}
+func (c *cacheWatcher) processInitialEvents(cacheInterval *watchCacheInterval) error {
 	// Check how long we are processing initEvents.
 	// As long as these are not processed, we are not processing
 	// any incoming events, so if it takes long, we may actually
@@ -485,13 +500,6 @@ func (c *cacheWatcher) processInitialEvents(cacheInterval *watchCacheInterval, r
 	// consider increase size of result buffer in those cases.
 	const initProcessThreshold = 500 * time.Millisecond
 	startTime := time.Now()
-
-	// cacheInterval may be created from a version being more fresh than requested
-	// (e.g. for NotOlderThan semantic). In such a case, we need to prevent watch event
-	// with lower resourceVersion from being delivered to ensure watch contract.
-	if cacheInterval.resourceVersion > resourceVersion {
-		resourceVersion = cacheInterval.resourceVersion
-	}
 
 	initEventCount := 0
 	for event, err := range cacheInterval.All() {
@@ -511,22 +519,9 @@ func (c *cacheWatcher) processInitialEvents(cacheInterval *watchCacheInterval, r
 			// custom clients, the cost of it is something that we
 			// are fully accepting.
 			klog.Warningf("couldn't retrieve watch event to serve: %#v", err)
-			return resourceVersion, err
+			return err
 		}
 		c.sendWatchCacheEvent(event)
-
-		// With some events already sent, update resourceVersion so that
-		// events that were buffered and not yet processed won't be delivered
-		// to this watcher second time causing going back in time.
-		//
-		// There is one case where events are not necessary ordered by
-		// resourceVersion, being a case of watching from resourceVersion=0,
-		// which at the beginning returns the state of each objects.
-		// For the purpose of it, we need to max it with the resource version
-		// that we have so far.
-		if event.ResourceVersion > resourceVersion {
-			resourceVersion = event.ResourceVersion
-		}
 		initEventCount++
 	}
 
@@ -542,7 +537,7 @@ func (c *cacheWatcher) processInitialEvents(cacheInterval *watchCacheInterval, r
 	if cacheInterval.initialEventsEndBookmark != nil {
 		c.sendWatchCacheEvent(cacheInterval.initialEventsEndBookmark)
 	}
-	return resourceVersion, nil
+	return nil
 }
 
 func (c *cacheWatcher) processIncomingEvents(ctx context.Context, resourceVersion uint64) {

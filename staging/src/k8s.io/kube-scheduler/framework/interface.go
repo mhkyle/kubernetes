@@ -878,6 +878,9 @@ type PlacementProgress struct {
 	// for a particular (composite) pod group and placement. For a pod group the field includes the pods that are assigned
 	// or assumed in the current PodGroup scheduling cycle.
 	Scheduled int
+	// Unschedulable is the number of children evaluated as unschedulable so far in the current pod group scheduling cycle
+	// for a particular (composite) pod group and placement.
+	Unschedulable int
 }
 
 // Handle provides data and some tools that plugins can use. It is
@@ -1027,6 +1030,10 @@ type PreemptionVictim interface {
 	// NumPDBViolations returns the number of PDB violations that evicting this victim would cause.
 	// This value is used for metrics and doesn't impact victim selection.
 	NumPDBViolations() int
+
+	// Type returns the type of the preemption unit.
+	// This value is used for metrics and doesn't impact victim selection.
+	Type() EntityKeyType
 }
 
 // PreemptionExecutor is an interface that provides preemption actuation and tracking operations.
@@ -1050,10 +1057,10 @@ type PreemptionCandidate interface {
 	Victims() *extenderv1.Victims
 	// Name returns the target node name (or "cluster" for pod group preemption) where the preemptor gets nominated to run.
 	Name() string
-	// NumPodGroupDisruptions returns the number of preemption units that affect pod groups.
-	// A single preemption unit can be all pods in a pod group (for DisruptionMode=all) or a single pod (for DisruptionMode=single).
+	// NumDisruptionsByVictimType returns the number of preemption units to be evicted, keyed by
+	// unit type (see PreemptionVictim.Type).
 	// This value is used for metrics and doesn't impact victim actuation.
-	NumPodGroupDisruptions() int
+	NumDisruptionsByVictimType() map[EntityKeyType]int
 	// Nodes returns a list of nodes where the preemptor pods get nominated to run.
 	// For a single pod preemption it's equal Name but for pod group preemption
 	// it contains a set of nodes for all preemptor pods.

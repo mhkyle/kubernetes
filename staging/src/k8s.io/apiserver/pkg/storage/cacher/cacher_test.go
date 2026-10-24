@@ -292,6 +292,7 @@ func TestLists(t *testing.T) {
 func TestCompactRevision(t *testing.T) {
 	// Test requires store to observe extenal changes to compaction revision, requiring dedicated watch on compact key which is enabled by ListFromCacheSnapshot.
 	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.ListFromCacheSnapshot, true)
+	forceRequestWatchProgressSupport(t)
 	ctx, cacher, server, terminate := testSetupWithEtcdServer(t)
 	t.Cleanup(terminate)
 	storagetesting.RunTestCompactRevision(ctx, t, cacher, increaseRVFunc(server.V3Client.Client), compactStore(cacher, server.V3Client.Client))
@@ -306,6 +307,18 @@ func TestMarkConsistent(t *testing.T) {
 	t.Log("New cache collects snapshots, list skips etcd")
 	resourceVersion1 := createObject(t, ctx, cacher)
 	etcdRequests := etcdListRequests(t, ctx, cacher, recorder, storage.ListOptions{
+		Predicate:            storage.Everything,
+		ResourceVersionMatch: metav1.ResourceVersionMatchExact,
+		ResourceVersion:      resourceVersion1,
+		Recursive:            true,
+	})
+	if len(etcdRequests) != 0 {
+		t.Errorf("Expected no requests to etcd, got: %+v", etcdRequests)
+	}
+
+	t.Log("Consistent cache marked consistent again keeps snapshots, list skips etcd")
+	cacher.cacher.MarkConsistent(true)
+	etcdRequests = etcdListRequests(t, ctx, cacher, recorder, storage.ListOptions{
 		Predicate:            storage.Everything,
 		ResourceVersionMatch: metav1.ResourceVersionMatchExact,
 		ResourceVersion:      resourceVersion1,
@@ -394,8 +407,7 @@ func TestCompactPastLastWrite(t *testing.T) {
 
 	t.Log("Same list after compaction to the listed resourceVersion")
 	compactStore(cacher, server.V3Client.Client)(ctx, t, resourceVersionPastLastWrite)
-	// TODO: Expect no requests to etcd, same as before compaction.
-	require.Len(t, etcdListRequests(t, ctx, cacher, recorder, list), 1)
+	require.Empty(t, etcdListRequests(t, ctx, cacher, recorder, list))
 }
 
 func TestGetListRecursivePrefix(t *testing.T) {
@@ -877,6 +889,7 @@ func BenchmarkStoreStats(b *testing.B) {
 }
 
 func TestCorrectness(t *testing.T) {
+	forceRequestWatchProgressSupport(t)
 	ctx, cacher, server, terminate := testSetupWithEtcdServer(t)
 	t.Cleanup(terminate)
 	correctness.RunTestCorrectness(ctx, t, cacher, etcd3testing.PathPrefix(), cacher.cacher.watchCache.config.keyFunc, compactStore(cacher, server.V3Client.Client))
