@@ -32,6 +32,7 @@ const (
 	NodeResourcesFit                = "NodeResourcesFit"
 	NodeUnschedulable               = "NodeUnschedulable"
 	NodeVolumeLimits                = "NodeVolumeLimits"
+	OSImageFreshness                = "OSImageFreshness"
 	PodTopologySpread               = "PodTopologySpread"
 	DeferredPodScheduling           = "DeferredPodScheduling"
 	SchedulingGates                 = "SchedulingGates"

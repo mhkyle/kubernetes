@@ -33,6 +33,7 @@ import (
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/noderesources"
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/nodeunschedulable"
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/nodevolumelimits"
+	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/osimagefreshness"
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/podgrouppodscount"
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/podtopologyspread"
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/queuesort"
@@ -67,6 +68,7 @@ func NewInTreeRegistry() runtime.Registry {
 		volumerestrictions.Name:              runtime.FactoryAdapter(fts, volumerestrictions.New),
 		volumezone.Name:                      runtime.FactoryAdapter(fts, volumezone.New),
 		nodevolumelimits.CSIName:             runtime.FactoryAdapter(fts, nodevolumelimits.NewCSI),
+		osimagefreshness.Name:                osimagefreshness.New,
 		interpodaffinity.Name:                runtime.FactoryAdapter(fts, interpodaffinity.New),
 		queuesort.Name:                       queuesort.New,
 		defaultbinder.Name:                   defaultbinder.New,
